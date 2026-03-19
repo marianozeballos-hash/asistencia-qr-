@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="grid">
+  <div class="card">
+    <h1>Importar padrón</h1>
+    <p>Subí un CSV con encabezados <strong>nombre</strong> y <strong>apellido</strong>.</p>
+    <form method="post" enctype="multipart/form-data">
+      <input type="file" name="roster_file" accept=".csv" required>
+      <button class="btn btn-primary" type="submit">Importar CSV</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Ejemplo</h2>
+    <div class="copy-box">nombre,apellido<br>Ana,García<br>Juan,Pérez</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Alumnos cargados ({{ roster|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Apellido</th><th>Nombre</th></tr></thead>
+      <tbody>
+        {% for row in roster %}
+          <tr><td>{{ row['last_name'] }}</td><td>{{ row['first_name'] }}</td></tr>
+        {% else %}
+          <tr><td colspan="2" class="muted">Todavía no cargaste alumnos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

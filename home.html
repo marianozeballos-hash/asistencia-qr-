@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card hero-card">
+  <div class="badge">iPhone ready · PWA instalable</div>
+  <h2 style="font-size: clamp(30px, 5vw, 42px);">Tomá asistencia desde tu iPhone</h2>
+  <p>Mostrás un QR que cambia cada 30 segundos, tus alumnos completan nombre y apellido, y después ves presentes y ausentes del día.</p>
+  <div class="pill-row">
+    <div class="pill">QR dinámico</div>
+    <div class="pill">Formulario móvil</div>
+    <div class="pill">Presentes / ausentes</div>
+    <div class="pill">Exportación CSV</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Uso rápido</h3>
+    <div class="stack">
+      <a class="btn btn-primary" href="{{ url_for('admin_qr') }}">Abrir QR de asistencia</a>
+      <a class="btn" href="{{ url_for('admin_roster') }}">Cargar padrón CSV</a>
+      <a class="btn" href="{{ url_for('admin_report') }}">Ver informe</a>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Instalar en iPhone</h3>
+    <ul class="tight">
+      <li>Abrí esta dirección en Safari del iPhone.</li>
+      <li>Tocá el botón Compartir.</li>
+      <li>Elegí <strong>Agregar a pantalla de inicio</strong>.</li>
+      <li>Te queda como app, en pantalla completa.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Dirección para abrir en tu iPhone</h3>
+    <p>Conectá el iPhone y esta computadora a la misma red Wi‑Fi y abrí:</p>
+    <div class="copy-box">http://{{ install_host }}:5000</div>
+    <p class="muted">Si abrís la app en la compu usando la IP local, el QR ya sale con esa dirección.</p>
+  </div>
+  <div class="card">
+    <h3>Fecha activa</h3>
+    <div class="big">{{ today }}</div>
+    <p>La asistencia se registra por día. El informe compara esa fecha con tu padrón cargado.</p>
+  </div>
+</div>
+{% endblock %}

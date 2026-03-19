@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+  <h1>Informe de asistencia</h1>
+  <form method="get">
+    <label>Fecha</label>
+    <input type="date" name="date" value="{{ selected_date }}">
+    <div class="cta-row">
+      <button class="btn btn-primary" type="submit">Ver informe</button>
+      <a class="btn" href="{{ url_for('admin_export', date=selected_date) }}">Exportar presentes CSV</a>
+    </div>
+  </form>
+</div>
+
+<div class="grid stats">
+  <div class="card center">
+    <div class="big">{{ roster_count }}</div>
+    <p>Total padrón</p>
+  </div>
+  <div class="card center">
+    <div class="big">{{ present_count }}</div>
+    <p>Presentes</p>
+  </div>
+  <div class="card center">
+    <div class="big">{{ absent_count }}</div>
+    <p>Ausentes</p>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Presentes</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th><th>Hora</th></tr></thead>
+        <tbody>
+          {% for row in present %}
+            <tr><td>{{ row['full_name'] }}</td><td>{{ row['created_at'][11:19] }}</td></tr>
+          {% else %}
+            <tr><td colspan="2" class="muted">Sin asistencias registradas.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Ausentes</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th></tr></thead>
+        <tbody>
+          {% for row in absent %}
+            <tr><td>{{ row['full_name'] }}</td></tr>
+          {% else %}
+            <tr><td class="muted">No hay ausentes o no hay padrón cargado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
