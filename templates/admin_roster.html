@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="grid"> 
+  <div class="card">
+    <h1>Importar padrón</h1>
+    <p>Subí un CSV con encabezados <strong>nombre</strong> y <strong>apellido</strong>.</p>
+    <form method="post" enctype="multipart/form-data" class="stack">
+      <input type="hidden" name="action" value="upload_csv">
+      <input type="file" name="roster_file" accept=".csv,text/csv">
+      <button class="btn btn-primary" type="submit">Importar CSV</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Alta manual</h2>
+    <form method="post" class="stack">
+      <input type="hidden" name="action" value="manual_single">
+      <div>
+        <label>Nombre</label>
+        <input type="text" name="first_name" placeholder="Ej. Ana" required>
+      </div>
+      <div>
+        <label>Apellido</label>
+        <input type="text" name="last_name" placeholder="Ej. García" required>
+      </div>
+      <button class="btn btn-primary" type="submit">Agregar alumno</button>
+    </form>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Pegado masivo</h2>
+    <p>Pegá una lista. Acepta una línea por alumno en formato <strong>nombre,apellido</strong>, <strong>nombre;apellido</strong> o <strong>nombre apellido</strong>.</p>
+    <form method="post" class="stack">
+      <input type="hidden" name="action" value="paste_bulk">
+      <textarea name="bulk_text" rows="8" placeholder="Ana,García&#10;Juan,Pérez&#10;María López"></textarea>
+      <button class="btn btn-primary" type="submit">Importar texto</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Ejemplo</h2>
+    <div class="copy-box">nombre,apellido<br>Ana,García<br>Juan,Pérez</div>
+    <p style="margin-top:10px">Si estás en iPhone y el selector de archivos falla, usá <strong>Alta manual</strong> o <strong>Pegado masivo</strong>.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row-between">
+    <h2>Alumnos cargados ({{ roster|length }})</h2>
+    {% if roster|length %}
+    <form method="post" onsubmit="return confirm('¿Vaciar todo el padrón?')">
+      <input type="hidden" name="action" value="clear_roster">
+      <button class="btn" type="submit">Vaciar padrón</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Apellido</th><th>Nombre</th><th></th></tr></thead>
+      <tbody>
+        {% for row in roster %}
+          <tr>
+            <td>{{ row['last_name'] }}</td>
+            <td>{{ row['first_name'] }}</td>
+            <td style="text-align:right; white-space:nowrap;">
+              <form method="post" onsubmit="return confirm('¿Eliminar este alumno?')">
+                <input type="hidden" name="action" value="delete_one">
+                <input type="hidden" name="roster_id" value="{{ row['id'] }}">
+                <button class="btn-ghost" type="submit">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="muted">Todavía no cargaste alumnos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
