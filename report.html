@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+  <h1>Asistencia</h1>
+  <div class="btnrow">
+    <a class="btn" href="{{ url_for('admin_qr') }}">Ver QR</a>
+    <a class="btn secondary" href="{{ url_for('roster') }}">Padrón</a>
+  </div>
+  <form method="get" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+    <input type="date" name="fecha" value="{{ fecha }}" style="max-width:220px">
+    <button type="submit">Ver</button>
+    <a class="btn secondary" href="{{ url_for('export_csv', fecha=fecha) }}">Exportar presentes</a>
+  </form>
+</div>
+<div class="card">
+  <h2>Presentes ({{ present|length }})</h2>
+  <table>
+    <thead><tr><th>Apellido</th><th>Nombre</th><th>Hora</th></tr></thead>
+    <tbody>
+      {% for row in present %}<tr><td>{{ row['apellido'] }}</td><td>{{ row['nombre'] }}</td><td>{{ row['created_at'][11:19] }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card">
+  <h2>Ausentes ({{ absent|length }})</h2>
+  <table>
+    <thead><tr><th>Apellido</th><th>Nombre</th></tr></thead>
+    <tbody>
+      {% for row in absent %}<tr><td>{{ row['apellido'] }}</td><td>{{ row['nombre'] }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
