@@ -1,281 +1,208 @@
+from __future__ import annotations
 import csv
+import hashlib
 import io
 import os
-import socket
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
+from flask import Flask, request, redirect, url_for, render_template, send_file, g, flash, jsonify
 
-from flask import (
-    Flask,
-    flash,
-    g,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    send_file,
-    url_for,
-)
-import pyotp
-import qrcode
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'attendance.db')
-SECRET = os.environ.get('ATTENDANCE_SECRET', 'CAMBIAR-ESTA-CLAVE-SECRETA')
-TOTP_INTERVAL = 30
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_DB = Path('/tmp/attendance.db')
+DB_PATH = Path(os.environ.get('ATTENDANCE_DB_PATH', str(DEFAULT_DB)))
+WINDOW_SECONDS = int(os.environ.get('WINDOW_SECONDS', '30'))
+SECRET = os.environ.get('ATTENDANCE_SECRET', 'cambiar-esta-clave')
+APP_TZ = ZoneInfo(os.environ.get('APP_TIMEZONE', 'America/Argentina/Buenos_Aires'))
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key')
+app.secret_key = os.environ.get('FLASK_SECRET', 'dev-secret')
+
+
+def now_local() -> datetime:
+    return datetime.now(APP_TZ)
 
 
 def get_db():
     if 'db' not in g:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
     return g.db
 
 
 @app.teardown_appcontext
-def close_db(exception=None):
+def close_db(exc):
     db = g.pop('db', None)
     if db is not None:
         db.close()
 
 
 def init_db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH)
-    cur = db.cursor()
-    cur.executescript(
-        '''
+    db.executescript(
+        """
         CREATE TABLE IF NOT EXISTS roster (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            first_name TEXT NOT NULL,
-            last_name TEXT NOT NULL,
-            full_name TEXT NOT NULL UNIQUE
+            nombre TEXT NOT NULL,
+            apellido TEXT NOT NULL,
+            UNIQUE(nombre, apellido)
         );
-
         CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT NOT NULL,
-            attendance_date TEXT NOT NULL,
+            fecha TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            apellido TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            UNIQUE(full_name, attendance_date)
+            UNIQUE(fecha, nombre, apellido)
         );
-        '''
+        """
     )
     db.commit()
     db.close()
 
 
-def get_local_ip() -> str:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except OSError:
-        return '127.0.0.1'
-    finally:
-        s.close()
+def normalize(text: str) -> str:
+    return ' '.join((text or '').strip().split())
 
 
-def current_token_uri():
-    token = pyotp.TOTP(SECRET, interval=TOTP_INTERVAL).now()
-    return url_for('student_form', token=token, _external=True)
+def today_str() -> str:
+    return now_local().strftime('%Y-%m-%d')
 
 
-def validate_token(token: str) -> bool:
-    totp = pyotp.TOTP(SECRET, interval=TOTP_INTERVAL)
-    return totp.verify(token, valid_window=1)
+def current_window() -> int:
+    return int(now_local().timestamp() // WINDOW_SECONDS)
 
 
-def normalize_name(first_name: str, last_name: str) -> tuple[str, str, str]:
-    first = ' '.join(first_name.strip().split())
-    last = ' '.join(last_name.strip().split())
-    full = f'{last}, {first}'
-    return first, last, full
+def build_token(window: int | None = None) -> str:
+    window = current_window() if window is None else window
+    day = now_local().strftime('%Y%m%d')
+    raw = f'{SECRET}:{day}:{window}'.encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()[:20]
 
 
-def fetch_roster():
-    db = get_db()
-    return db.execute('SELECT * FROM roster ORDER BY last_name, first_name').fetchall()
+def valid_token(token: str) -> bool:
+    win = current_window()
+    return token in {build_token(win), build_token(win - 1), build_token(win + 1)}
 
 
-def fetch_present(attendance_date: str):
-    db = get_db()
-    return db.execute(
-        'SELECT * FROM attendance WHERE attendance_date = ? ORDER BY full_name',
-        (attendance_date,),
-    ).fetchall()
+def student_link(token: str | None = None) -> str:
+    tok = token or build_token()
+    return url_for('student_form', token=tok, _external=True)
 
 
 @app.route('/')
 def home():
-    today = date.today().isoformat()
-    install_host = request.host.split(':')[0]
-    return render_template('home.html', today=today, install_host=install_host)
+    return redirect(url_for('report'))
 
 
-@app.route('/manifest.json')
-def manifest():
-    return jsonify(
-        {
-            'name': 'Asistencia QR',
-            'short_name': 'Asistencia',
-            'start_url': '/',
-            'display': 'standalone',
-            'background_color': '#f4f7fb',
-            'theme_color': '#111827',
-            'lang': 'es-AR',
-            'icons': [
-                {
-                    'src': url_for('static', filename='icons/icon-192.png'),
-                    'sizes': '192x192',
-                    'type': 'image/png',
-                },
-                {
-                    'src': url_for('static', filename='icons/icon-512.png'),
-                    'sizes': '512x512',
-                    'type': 'image/png',
-                },
-            ],
-        }
-    )
-
-
-@app.route('/sw.js')
-def service_worker():
-    return app.send_static_file('sw.js')
-
-
-@app.route('/qr.png')
-def qr_png():
-    qr = qrcode.QRCode(box_size=10, border=4)
-    qr.add_data(current_token_uri())
-    qr.make(fit=True)
-    img = qr.make_image(fill_color='black', back_color='white')
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    buf.seek(0)
-    return send_file(buf, mimetype='image/png')
+@app.route('/health')
+def health():
+    return jsonify({
+        'ok': True,
+        'date': today_str(),
+        'window_seconds': WINDOW_SECONDS,
+        'timezone': str(APP_TZ),
+        'db_path': str(DB_PATH),
+    })
 
 
 @app.route('/admin/qr')
 def admin_qr():
-    current_url = current_token_uri()
-    return render_template('admin_qr.html', interval=TOTP_INTERVAL, current_url=current_url)
+    token = build_token()
+    link = student_link(token)
+    qr_img_url = f"https://api.qrserver.com/v1/create-qr-code/?size=320x320&data={quote(link, safe='')}"
+    seconds_left = WINDOW_SECONDS - (int(now_local().timestamp()) % WINDOW_SECONDS)
+    return render_template('qr.html', link=link, token=token, qr_img_url=qr_img_url, seconds_left=seconds_left)
 
 
-@app.route('/attendance', methods=['GET', 'POST'])
-def student_form():
-    token = request.values.get('token', '')
+@app.route('/s/<token>', methods=['GET', 'POST'])
+def student_form(token: str):
+    if not valid_token(token):
+        return render_template('invalid.html'), 403
 
     if request.method == 'POST':
-        first_name = request.form.get('first_name', '')
-        last_name = request.form.get('last_name', '')
+        nombre = normalize(request.form.get('nombre', ''))
+        apellido = normalize(request.form.get('apellido', ''))
+        if not nombre or not apellido:
+            flash('Completá nombre y apellido.')
+            return render_template('student_form.html')
 
-        if not validate_token(token):
-            flash('El QR venció. Volvé a escanear el código actual.', 'error')
-            return redirect(url_for('student_form', token=token))
-
-        if not first_name.strip() or not last_name.strip():
-            flash('Completá nombre y apellido.', 'error')
-            return redirect(url_for('student_form', token=token))
-
-        first, last, full_name = normalize_name(first_name, last_name)
         db = get_db()
-        today = date.today().isoformat()
-        now = datetime.now().isoformat(timespec='seconds')
+        try:
+            db.execute(
+                'INSERT OR IGNORE INTO attendance (fecha, nombre, apellido, created_at) VALUES (?, ?, ?, ?)',
+                (today_str(), nombre, apellido, now_local().isoformat(timespec='seconds')),
+            )
+            db.commit()
+        except sqlite3.Error:
+            flash('No se pudo registrar la asistencia.')
+            return render_template('student_form.html')
+        return render_template('thanks.html', nombre=nombre, apellido=apellido)
 
-        db.execute(
-            '''
-            INSERT INTO attendance (full_name, attendance_date, created_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(full_name, attendance_date) DO UPDATE SET created_at = excluded.created_at
-            ''',
-            (full_name, today, now),
-        )
-        db.commit()
-        return render_template('success.html', full_name=full_name)
-
-    token_valid = validate_token(token) if token else False
-    return render_template('student_form.html', token=token, token_valid=token_valid)
+    return render_template('student_form.html')
 
 
 @app.route('/admin/roster', methods=['GET', 'POST'])
-def admin_roster():
+def roster():
     db = get_db()
     if request.method == 'POST':
-        file = request.files.get('roster_file')
+        file = request.files.get('file')
         if not file or not file.filename:
-            flash('Elegí un archivo CSV.', 'error')
-            return redirect(url_for('admin_roster'))
+            flash('Elegí un CSV con columnas nombre,apellido.')
+            return redirect(url_for('roster'))
 
         content = file.read().decode('utf-8-sig')
         reader = csv.DictReader(io.StringIO(content))
-        expected = {'nombre', 'apellido'}
-        if not reader.fieldnames or not expected.issubset({h.strip().lower() for h in reader.fieldnames}):
-            flash('El CSV debe tener las columnas: nombre, apellido', 'error')
-            return redirect(url_for('admin_roster'))
-
-        inserted = 0
+        rows = []
         for row in reader:
-            first = row.get('nombre') or row.get('Nombre') or row.get('NOMBRE') or ''
-            last = row.get('apellido') or row.get('Apellido') or row.get('APELLIDO') or ''
-            if not first.strip() or not last.strip():
-                continue
-            first, last, full = normalize_name(first, last)
-            db.execute(
-                'INSERT OR IGNORE INTO roster (first_name, last_name, full_name) VALUES (?, ?, ?)',
-                (first, last, full),
-            )
-            inserted += 1
+            nombre = normalize(row.get('nombre', ''))
+            apellido = normalize(row.get('apellido', ''))
+            if nombre and apellido:
+                rows.append((nombre, apellido))
+        db.execute('DELETE FROM roster')
+        db.executemany('INSERT OR IGNORE INTO roster (nombre, apellido) VALUES (?, ?)', rows)
         db.commit()
-        flash(f'Importación terminada. Filas procesadas: {inserted}', 'ok')
-        return redirect(url_for('admin_roster'))
+        flash(f'Se cargaron {len(rows)} alumnos.')
+        return redirect(url_for('roster'))
 
-    roster = fetch_roster()
-    return render_template('admin_roster.html', roster=roster)
+    roster_rows = db.execute('SELECT nombre, apellido FROM roster ORDER BY apellido, nombre').fetchall()
+    return render_template('roster.html', roster=roster_rows)
 
 
 @app.route('/admin/report')
-def admin_report():
-    selected_date = request.args.get('date') or date.today().isoformat()
-    roster = fetch_roster()
-    present = fetch_present(selected_date)
-
-    present_names = {r['full_name'] for r in present}
-    absent = [r for r in roster if r['full_name'] not in present_names]
-
-    return render_template(
-        'admin_report.html',
-        selected_date=selected_date,
-        present=present,
-        absent=absent,
-        roster_count=len(roster),
-        present_count=len(present),
-        absent_count=len(absent),
-    )
+def report():
+    db = get_db()
+    fecha = request.args.get('fecha', today_str())
+    present = db.execute(
+        'SELECT nombre, apellido, created_at FROM attendance WHERE fecha = ? ORDER BY apellido, nombre', (fecha,)
+    ).fetchall()
+    roster_rows = db.execute('SELECT nombre, apellido FROM roster ORDER BY apellido, nombre').fetchall()
+    present_set = {(r['nombre'], r['apellido']) for r in present}
+    absent = [r for r in roster_rows if (r['nombre'], r['apellido']) not in present_set]
+    return render_template('report.html', fecha=fecha, present=present, absent=absent)
 
 
 @app.route('/admin/export')
-def admin_export():
-    selected_date = request.args.get('date') or date.today().isoformat()
-    present = fetch_present(selected_date)
+def export_csv():
+    db = get_db()
+    fecha = request.args.get('fecha', today_str())
+    rows = db.execute(
+        'SELECT nombre, apellido, created_at FROM attendance WHERE fecha = ? ORDER BY apellido, nombre', (fecha,)
+    ).fetchall()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['fecha', 'nombre_completo', 'registrado_en'])
-    for row in present:
-        writer.writerow([row['attendance_date'], row['full_name'], row['created_at']])
+    writer.writerow(['fecha', 'nombre', 'apellido', 'registrado_en'])
+    for r in rows:
+        writer.writerow([fecha, r['nombre'], r['apellido'], r['created_at']])
     mem = io.BytesIO(output.getvalue().encode('utf-8-sig'))
-    mem.seek(0)
-    return send_file(mem, mimetype='text/csv', as_attachment=True, download_name=f'presentes_{selected_date}.csv')
+    return send_file(mem, mimetype='text/csv', as_attachment=True, download_name=f'presentes_{fecha}.csv')
 
+
+init_db()
 
 if __name__ == '__main__':
-    init_db()
-    port = int(os.environ.get('PORT', 5000))
-    host = os.environ.get('HOST', '0.0.0.0')
-    print('\nAsistencia QR lista para iPhone')
-    print(f'En esta computadora: http://127.0.0.1:{port}')
-    print(f'Desde tu iPhone en la misma Wi-Fi: http://{get_local_ip()}:{port}\n')
-    app.run(debug=True, host=host, port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', '5000')), debug=True)
